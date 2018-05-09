@@ -151,6 +151,17 @@ def main():
     # Step 3: build graph
 
     total_accuracy = 0.0
+
+    # dataset loader
+    n_examples = 600
+    n_episodes = 100
+    args_data = {}
+    args_data['x_dim'] = '84,84,3'
+    args_data['ratio'] = 1.0
+    args_data['seed'] = 1000
+    loader_test = dataset_mini(n_examples, n_episodes, 'test', args_data)
+    loader_test.load_data_pkl()
+
     for episode in range(EPISODE):
 
             # test
@@ -160,13 +171,36 @@ def main():
             for i in range(TEST_EPISODE):
                 total_rewards = 0
                 counter = 0
-                task = tg.MiniImagenetTask(metatest_folders,CLASS_NUM,1,15)
-                sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=1,split="train",shuffle=False)
+                #task = tg.MiniImagenetTask(metatest_folders,CLASS_NUM,1,15)
+                #sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=1,split="train",shuffle=False)
 
-                num_per_class = 3
-                test_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=num_per_class,split="test",shuffle=True)
-                sample_images,sample_labels = sample_dataloader.__iter__().next()
-                for test_images,test_labels in test_dataloader:
+                #num_per_class = 3
+                #test_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=num_per_class,split="test",shuffle=True)
+
+                # sample data for next batch
+                support, s_labels, query, q_labels, unlabel = loader_test.next_data(CLASS_NUM, SAMPLE_NUM_PER_CLASS, 15)
+                samples = np.reshape(support, (support.shape[0]*support.shape[1],)+support.shape[2:])
+                samples = torch.from_numpy(np.transpose(samples, (0,3,1,2)))
+                batches = np.reshape(query, (query.shape[0]*query.shape[1],)+query.shape[2:])
+                batches = torch.from_numpy(np.transpose(batches, (0,3,1,2)))
+                sample_labels = torch.from_numpy(np.reshape(s_labels,(-1,)))
+                batch_labels  = torch.from_numpy(np.reshape(q_labels,(-1,)))
+                sample_labels =  sample_labels.type(torch.LongTensor)
+                batch_labels =  batch_labels.type(torch.LongTensor)
+                sample_images = samples
+                
+                index = []
+                for i in range(15):
+                    for j in range(CLASS_NUM):
+                        index.append(i+j*15)
+                index = [index[i:i+25] for i  in range(0, len(index), 25)]
+
+
+                #sample_images,sample_labels = sample_dataloader.__iter__().next()
+                #for test_images,test_labels in test_dataloader:
+                for idx in index:
+                    test_images = batches[idx]
+                    test_labels = batch_labels[idx]
                     batch_size = test_labels.shape[0]
                     # calculate features
                     sample_features = feature_encoder(Variable(sample_images).cuda(GPU)) # 5x64

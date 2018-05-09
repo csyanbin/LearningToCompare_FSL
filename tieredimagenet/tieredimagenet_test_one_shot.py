@@ -19,16 +19,15 @@ import argparse
 import scipy as sp
 import scipy.stats
 
-from dataset_mini import *
-
+from dataset_tiered import *
 
 parser = argparse.ArgumentParser(description="One Shot Visual Recognition")
 parser.add_argument("-f","--feature_dim",type = int, default = 64)
 parser.add_argument("-r","--relation_dim",type = int, default = 8)
 parser.add_argument("-w","--class_num",type = int, default = 5)
-parser.add_argument("-s","--sample_num_per_class",type = int, default = 5)
+parser.add_argument("-s","--sample_num_per_class",type = int, default = 1)
 parser.add_argument("-b","--batch_num_per_class",type = int, default = 10)
-parser.add_argument("-e","--episode",type = int, default= 500000)
+parser.add_argument("-e","--episode",type = int, default= 10)
 parser.add_argument("-t","--test_episode", type = int, default = 600)
 parser.add_argument("-l","--learning_rate", type = float, default = 0.001)
 parser.add_argument("-g","--gpu",type=int, default=0)
@@ -40,7 +39,7 @@ args = parser.parse_args()
 FEATURE_DIM = args.feature_dim
 RELATION_DIM = args.relation_dim
 CLASS_NUM = args.class_num
-SAMPLE_NUM_PER_CLASS = args.sample_num_per_class
+SAMPLE_NUM_PER_CLASS = 1
 BATCH_NUM_PER_CLASS = args.batch_num_per_class
 EPISODE = args.episode
 TEST_EPISODE = args.test_episode
@@ -54,6 +53,7 @@ def mean_confidence_interval(data, confidence=0.95):
     m, se = np.mean(a), scipy.stats.sem(a)
     h = se * sp.stats.t._ppf((1+confidence)/2., n-1)
     return m,h
+
 
 class CNNEncoder(nn.Module):
     """docstring for ClassName"""
@@ -91,7 +91,7 @@ class RelationNetwork(nn.Module):
     def __init__(self,input_size,hidden_size):
         super(RelationNetwork, self).__init__()
         self.layer1 = nn.Sequential(
-                        nn.Conv2d(64*2,64,kernel_size=3,padding=0),
+                        nn.Conv2d(128,64,kernel_size=3,padding=0),
                         nn.BatchNorm2d(64, momentum=1, affine=True),
                         nn.ReLU(),
                         nn.MaxPool2d(2))
@@ -130,7 +130,7 @@ def main():
     # Step 1: init data folders
     print("init data folders")
     # init character folders for dataset construction
-    metatrain_folders,metatest_folders = tg.mini_imagenet_folders()
+    #metatrain_folders,metatest_folders = tg.mini_imagenet_folders()
 
     # Step 2: init neural networks
     print("init neural networks")
@@ -138,28 +138,21 @@ def main():
     feature_encoder = CNNEncoder()
     relation_network = RelationNetwork(FEATURE_DIM,RELATION_DIM)
 
-    feature_encoder.apply(weights_init)
-    relation_network.apply(weights_init)
 
     feature_encoder.cuda(GPU)
     relation_network.cuda(GPU)
 
-    feature_encoder_optim = torch.optim.Adam(feature_encoder.parameters(),lr=LEARNING_RATE)
-    feature_encoder_scheduler = StepLR(feature_encoder_optim,step_size=100000,gamma=0.5)
-    relation_network_optim = torch.optim.Adam(relation_network.parameters(),lr=LEARNING_RATE)
-    relation_network_scheduler = StepLR(relation_network_optim,step_size=100000,gamma=0.5)
 
-    if os.path.exists(str("./models/miniimagenet_feature_encoder_" + str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl")):
-        feature_encoder.load_state_dict(torch.load(str("./models/miniimagenet_feature_encoder_" + str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl")))
+    if os.path.exists(str("./models/tieredimagenet_feature_encoder_" + str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl")):
+        feature_encoder.load_state_dict(torch.load(str("./models/tieredimagenet_feature_encoder_" + str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl")))
         print("load feature encoder success")
-    if os.path.exists(str("./models/miniimagenet_relation_network_"+ str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl")):
-        relation_network.load_state_dict(torch.load(str("./models/miniimagenet_relation_network_"+ str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl")))
+    if os.path.exists(str("./models/tieredimagenet_relation_network_"+ str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl")):
+        relation_network.load_state_dict(torch.load(str("./models/tieredimagenet_relation_network_"+ str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl")))
         print("load relation network success")
 
     # Step 3: build graph
-    print("Training...")
 
-    last_accuracy = 0.0
+    total_accuracy = 0.0
 
     # dataset loader
     n_examples = 600
@@ -168,89 +161,26 @@ def main():
     args_data['x_dim'] = '84,84,3'
     args_data['ratio'] = 1.0
     args_data['seed'] = 1000
-    loader_train = dataset_mini(n_examples, n_episodes, 'train', args_data)
-    loader_val   = dataset_mini(n_examples, n_episodes, 'val', args_data)
-    loader_train.load_data_pkl()
-    loader_val.load_data_pkl()
+    loader_test = dataset_tiered(n_examples, n_episodes, 'test', args_data)
+    loader_test.load_data_pkl()
 
     for episode in range(EPISODE):
 
-        feature_encoder_scheduler.step(episode)
-        relation_network_scheduler.step(episode)
-
-        # init dataset
-        # sample_dataloader is to obtain previous samples for compare
-        # batch_dataloader is to batch samples for training
-        #task = tg.MiniImagenetTask(metatrain_folders,CLASS_NUM,SAMPLE_NUM_PER_CLASS,BATCH_NUM_PER_CLASS)
-        #sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=SAMPLE_NUM_PER_CLASS,split="train",shuffle=False)
-        #batch_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=BATCH_NUM_PER_CLASS,split="test",shuffle=True)
-
-        # sample datas
-        #samples,sample_labels = sample_dataloader.__iter__().next() #25*3*84*84
-        #batches,batch_labels = batch_dataloader.__iter__().next()
-
-        # sample data for next batch
-        support, s_labels, query, q_labels, unlabel = loader_train.next_data(CLASS_NUM, SAMPLE_NUM_PER_CLASS, BATCH_NUM_PER_CLASS)
-        samples = np.reshape(support, (support.shape[0]*support.shape[1],)+support.shape[2:])
-        samples = torch.from_numpy(np.transpose(samples, (0,3,1,2)))
-        batches = np.reshape(query, (query.shape[0]*query.shape[1],)+query.shape[2:])
-        batches = torch.from_numpy(np.transpose(batches, (0,3,1,2)))
-        sample_labels = torch.from_numpy(np.reshape(s_labels,(-1,)))
-        batch_labels  = torch.from_numpy(np.reshape(q_labels,(-1,)))
-        sample_labels =  sample_labels.type(torch.LongTensor)
-        batch_labels =  batch_labels.type(torch.LongTensor)
-
-        # calculate features
-        sample_features = feature_encoder(Variable(samples).cuda(GPU)) # 25*64*19*19
-        sample_features = sample_features.view(CLASS_NUM,SAMPLE_NUM_PER_CLASS,FEATURE_DIM,19,19)
-        sample_features = torch.sum(sample_features,1).squeeze(1)
-        batch_features = feature_encoder(Variable(batches).cuda(GPU)) # 20x64*5*5
-
-        # calculate relations
-        # each batch sample link to every samples to calculate relations
-        # to form a 100x128 matrix for relation network
-        sample_features_ext = sample_features.unsqueeze(0).repeat(BATCH_NUM_PER_CLASS*CLASS_NUM,1,1,1,1)
-        batch_features_ext = batch_features.unsqueeze(0).repeat(CLASS_NUM,1,1,1,1)
-        batch_features_ext = torch.transpose(batch_features_ext,0,1)
-        relation_pairs = torch.cat((sample_features_ext,batch_features_ext),2).view(-1,FEATURE_DIM*2,19,19)
-        relations = relation_network(relation_pairs).view(-1,CLASS_NUM)
-
-        mse = nn.MSELoss().cuda(GPU)
-        one_hot_labels = Variable(torch.zeros(BATCH_NUM_PER_CLASS*CLASS_NUM, CLASS_NUM).scatter_(1, batch_labels.view(-1,1), 1).cuda(GPU))
-        loss = mse(relations,one_hot_labels)
-
-
-        # training
-
-        feature_encoder.zero_grad()
-        relation_network.zero_grad()
-
-        loss.backward()
-
-        torch.nn.utils.clip_grad_norm(feature_encoder.parameters(),0.5)
-        torch.nn.utils.clip_grad_norm(relation_network.parameters(),0.5)
-
-        feature_encoder_optim.step()
-        relation_network_optim.step()
-
-
-        if (episode+1)%100 == 0:
-                print("episode:",episode+1,"loss",loss.data[0])
-
-        if episode%5000 == 0:
-
             # test
             print("Testing...")
+
             accuracies = []
             for i in range(TEST_EPISODE):
                 total_rewards = 0
-                #task = tg.MiniImagenetTask(metatest_folders,CLASS_NUM,SAMPLE_NUM_PER_CLASS,15)
-                #sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=SAMPLE_NUM_PER_CLASS,split="train",shuffle=False)
-                num_per_class = 5
-                #test_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=num_per_class,split="test",shuffle=False)
-        
+                counter = 0
+                #task = tg.MiniImagenetTask(metatest_folders,CLASS_NUM,1,15)
+                #sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=1,split="train",shuffle=False)
+
+                #num_per_class = 3
+                #test_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=num_per_class,split="test",shuffle=True)
+
                 # sample data for next batch
-                support, s_labels, query, q_labels, unlabel = loader_val.next_data(CLASS_NUM, SAMPLE_NUM_PER_CLASS, 15)
+                support, s_labels, query, q_labels, unlabel = loader_test.next_data(CLASS_NUM, SAMPLE_NUM_PER_CLASS, 15)
                 samples = np.reshape(support, (support.shape[0]*support.shape[1],)+support.shape[2:])
                 samples = torch.from_numpy(np.transpose(samples, (0,3,1,2)))
                 batches = np.reshape(query, (query.shape[0]*query.shape[1],)+query.shape[2:])
@@ -265,7 +195,8 @@ def main():
                 for i in range(15):
                     for j in range(CLASS_NUM):
                         index.append(i+j*15)
-                index = [index[i:i+num_per_class*CLASS_NUM] for i  in range(0, len(index), num_per_class*CLASS_NUM)]
+                index = [index[i:i+25] for i  in range(0, len(index), 25)]
+
 
                 #sample_images,sample_labels = sample_dataloader.__iter__().next()
                 #for test_images,test_labels in test_dataloader:
@@ -275,15 +206,12 @@ def main():
                     batch_size = test_labels.shape[0]
                     # calculate features
                     sample_features = feature_encoder(Variable(sample_images).cuda(GPU)) # 5x64
-                    sample_features = sample_features.view(CLASS_NUM,SAMPLE_NUM_PER_CLASS,FEATURE_DIM,19,19)
-                    sample_features = torch.sum(sample_features,1).squeeze(1)
                     test_features = feature_encoder(Variable(test_images).cuda(GPU)) # 20x64
 
                     # calculate relations
                     # each batch sample link to every samples to calculate relations
                     # to form a 100x128 matrix for relation network
                     sample_features_ext = sample_features.unsqueeze(0).repeat(batch_size,1,1,1,1)
-
                     test_features_ext = test_features.unsqueeze(0).repeat(1*CLASS_NUM,1,1,1,1)
                     test_features_ext = torch.transpose(test_features_ext,0,1)
                     relation_pairs = torch.cat((sample_features_ext,test_features_ext),2).view(-1,FEATURE_DIM*2,19,19)
@@ -294,24 +222,17 @@ def main():
                     rewards = [1 if predict_labels[j]==test_labels[j] else 0 for j in range(batch_size)]
 
                     total_rewards += np.sum(rewards)
-                
-                accuracy = total_rewards/1.0/CLASS_NUM/15
+                    counter += batch_size
+                accuracy = total_rewards/1.0/counter
                 accuracies.append(accuracy)
-
 
             test_accuracy,h = mean_confidence_interval(accuracies)
 
             print("test accuracy:",test_accuracy,"h:",h)
 
-            if test_accuracy > last_accuracy:
+            total_accuracy += test_accuracy
 
-                # save networks
-                torch.save(feature_encoder.state_dict(),str("./models/miniimagenet_feature_encoder_" + str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl"))
-                torch.save(relation_network.state_dict(),str("./models/miniimagenet_relation_network_"+ str(CLASS_NUM) +"way_" + str(SAMPLE_NUM_PER_CLASS) +"shot.pkl"))
-
-                print("save networks for episode:",episode)
-
-                last_accuracy = test_accuracy
+    print("aver_accuracy:",total_accuracy/EPISODE)
 
 
 

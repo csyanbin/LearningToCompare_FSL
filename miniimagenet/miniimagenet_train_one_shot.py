@@ -19,6 +19,8 @@ import argparse
 import scipy as sp
 import scipy.stats
 
+from dataset_mini import *
+
 parser = argparse.ArgumentParser(description="One Shot Visual Recognition")
 parser.add_argument("-f","--feature_dim",type = int, default = 64)
 parser.add_argument("-r","--relation_dim",type = int, default = 8)
@@ -158,6 +160,18 @@ def main():
 
     last_accuracy = 0.0
 
+    # dataset loader
+    n_examples = 600
+    n_episodes = 100
+    args_data = {}
+    args_data['x_dim'] = '84,84,3'
+    args_data['ratio'] = 1.0
+    args_data['seed'] = 1000
+    loader_train = dataset_mini(n_examples, n_episodes, 'train', args_data)
+    loader_val   = dataset_mini(n_examples, n_episodes, 'val', args_data)
+    loader_train.load_data_pkl()
+    loader_val.load_data_pkl()
+
     for episode in range(EPISODE):
 
         feature_encoder_scheduler.step(episode)
@@ -166,13 +180,24 @@ def main():
         # init dataset
         # sample_dataloader is to obtain previous samples for compare
         # batch_dataloader is to batch samples for training
-        task = tg.MiniImagenetTask(metatrain_folders,CLASS_NUM,SAMPLE_NUM_PER_CLASS,BATCH_NUM_PER_CLASS)
-        sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=SAMPLE_NUM_PER_CLASS,split="train",shuffle=False)
-        batch_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=BATCH_NUM_PER_CLASS,split="test",shuffle=True)
+        #task = tg.MiniImagenetTask(metatrain_folders,CLASS_NUM,SAMPLE_NUM_PER_CLASS,BATCH_NUM_PER_CLASS)
+        #sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=SAMPLE_NUM_PER_CLASS,split="train",shuffle=False)
+        #batch_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=BATCH_NUM_PER_CLASS,split="test",shuffle=True)
 
         # sample datas
-        samples,sample_labels = sample_dataloader.__iter__().next()
-        batches,batch_labels = batch_dataloader.__iter__().next()
+        #samples,sample_labels = sample_dataloader.__iter__().next()
+        #batches,batch_labels = batch_dataloader.__iter__().next()
+
+        # sample data for next batch
+        support, s_labels, query, q_labels, unlabel = loader_train.next_data(CLASS_NUM, SAMPLE_NUM_PER_CLASS, BATCH_NUM_PER_CLASS)
+        samples = np.reshape(support, (support.shape[0]*support.shape[1],)+support.shape[2:])
+        samples = torch.from_numpy(np.transpose(samples, (0,3,1,2)))
+        batches = np.reshape(query, (query.shape[0]*query.shape[1],)+query.shape[2:])
+        batches = torch.from_numpy(np.transpose(batches, (0,3,1,2)))
+        sample_labels = torch.from_numpy(np.reshape(s_labels,(-1,)))
+        batch_labels  = torch.from_numpy(np.reshape(q_labels,(-1,)))
+        sample_labels =  sample_labels.type(torch.LongTensor)
+        batch_labels =  batch_labels.type(torch.LongTensor)
 
         # calculate features
         sample_features = feature_encoder(Variable(samples).cuda(GPU)) # 5x64*5*5
@@ -217,13 +242,35 @@ def main():
             for i in range(TEST_EPISODE):
                 total_rewards = 0
                 counter = 0
-                task = tg.MiniImagenetTask(metatest_folders,CLASS_NUM,1,15)
-                sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=1,split="train",shuffle=False)
-
+                #task = tg.MiniImagenetTask(metatest_folders,CLASS_NUM,1,15)
                 num_per_class = 3
-                test_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=num_per_class,split="test",shuffle=True)
-                sample_images,sample_labels = sample_dataloader.__iter__().next()
-                for test_images,test_labels in test_dataloader:
+                #sample_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=1,split="train",shuffle=False)
+
+                #test_dataloader = tg.get_mini_imagenet_data_loader(task,num_per_class=num_per_class,split="test",shuffle=True)
+
+                # sample data for next batch
+                support, s_labels, query, q_labels, unlabel = loader_val.next_data(CLASS_NUM, SAMPLE_NUM_PER_CLASS, 15)
+                samples = np.reshape(support, (support.shape[0]*support.shape[1],)+support.shape[2:])
+                samples = torch.from_numpy(np.transpose(samples, (0,3,1,2)))
+                batches = np.reshape(query, (query.shape[0]*query.shape[1],)+query.shape[2:])
+                batches = torch.from_numpy(np.transpose(batches, (0,3,1,2)))
+                sample_labels = torch.from_numpy(np.reshape(s_labels,(-1,)))
+                batch_labels  = torch.from_numpy(np.reshape(q_labels,(-1,)))
+                sample_labels =  sample_labels.type(torch.LongTensor)
+                batch_labels =  batch_labels.type(torch.LongTensor)
+                sample_images = samples
+                
+                index = []
+                for i in range(15):
+                    for j in range(CLASS_NUM):
+                        index.append(i+j*15)
+                index = [index[i:i+num_per_class*CLASS_NUM] for i  in range(0, len(index), num_per_class*CLASS_NUM)]
+
+                #sample_images,sample_labels = sample_dataloader.__iter__().next()
+                #for test_images,test_labels in test_dataloader:
+                for idx in index:
+                    test_images = batches[idx]
+                    test_labels = batch_labels[idx]
                     batch_size = test_labels.shape[0]
                     # calculate features
                     sample_features = feature_encoder(Variable(sample_images).cuda(GPU)) # 5x64
