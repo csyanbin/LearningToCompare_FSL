@@ -19,6 +19,8 @@ import argparse
 import scipy as sp
 import scipy.stats
 
+from dataset_mini import *
+
 parser = argparse.ArgumentParser(description="One Shot Visual Recognition")
 parser.add_argument("-f","--feature_dim",type = int, default = 64)
 parser.add_argument("-r","--relation_dim",type = int, default = 8)

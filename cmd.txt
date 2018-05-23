@@ -1,0 +1,3 @@
+python miniimagenet_train_one_shot.py -w 5 -s 1 -b 15
+python miniimagenet_train_few_shot.py -w 5 -s 5 -b 10
+
