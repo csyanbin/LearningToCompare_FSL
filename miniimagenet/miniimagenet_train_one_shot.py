@@ -129,7 +129,7 @@ def main():
     # Step 1: init data folders
     print("init data folders")
     # init character folders for dataset construction
-    metatrain_folders,metatest_folders = tg.mini_imagenet_folders()
+    #metatrain_folders,metatest_folders = tg.mini_imagenet_folders()
 
     # Step 2: init neural networks
     print("init neural networks")
